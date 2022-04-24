@@ -11,7 +11,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client
+all: $(GIT_HOOKS) client client_statistic
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -28,6 +28,8 @@ unload:
 
 client: client.c
 	$(CC) -o $@ $^
+client_statistic: client_statistic.c
+	$(CC) -o $@ $^ -lm
 
 PRINTF = env printf
 PASS_COLOR = \e[32;01m
@@ -41,3 +43,9 @@ check: all
 	$(MAKE) unload
 	@diff -u out scripts/expected.txt && $(call pass)
 	@scripts/verify.py
+
+statistic: all
+	$(MAKE) unload
+	$(MAKE) load
+	sudo ./client_statistic > out
+	$(MAKE) unload

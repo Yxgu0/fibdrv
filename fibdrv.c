@@ -68,7 +68,6 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    // return (ssize_t) fib_sequence(*offset);
     bn *fib = bn_alloc(1);
     bn_fib_fdoubling(fib, *offset);
     char *p = bn_to_string(fib);
@@ -80,13 +79,40 @@ static ssize_t fib_read(struct file *file,
     return left;  // returns number of bytes that could not be copied
 }
 
-/* write operation is skipped */
+/*
+ * calculate the fibonacci number at given offset with given mode,
+ * and return the execution time.
+ */
 static ssize_t fib_write(struct file *file,
-                         const char *buf,
-                         size_t size,
+                         char *buf,
+                         size_t mode,
                          loff_t *offset)
 {
-    return 1;
+    bn *fib = bn_alloc(1);
+
+    ktime_t kt;
+    switch (mode) {
+    case 0:
+        kt = ktime_get();
+        bn_fib(fib, *offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    case 1:
+        kt = ktime_get();
+        bn_fib_fdoubling(fib, *offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    default:
+        return -1;  // unknown calculation mode, return -1 as error code
+    }
+
+    char *p = bn_to_string(fib);
+    size_t len = strlen(p) + 1;
+    copy_to_user(buf, p, len);
+    bn_free(fib);
+    kfree(p);
+
+    return ktime_to_ns(kt);
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
