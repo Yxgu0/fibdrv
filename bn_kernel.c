@@ -142,12 +142,12 @@ int bn_cpy(bn *dest, bn *src)
 }
 
 /* swap bn ptr */
-// void bn_swap(bn *a, bn *b)
-// {
-//     bn tmp = *a;
-//     *a = *b;
-//     *b = tmp;
-// }
+void bn_swap(bn *a, bn *b)
+{
+    bn tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
 
 /* left bit shift on bn (maximun shift 31) */
 void bn_lshift(bn *src, size_t shift)
@@ -165,24 +165,6 @@ void bn_lshift(bn *src, size_t shift)
             src->number[i] << shift | src->number[i - 1] >> (32 - shift);
     src->number[0] <<= shift;
 }
-
-/* right bit shift on bn (maximun shift 31) */
-// void bn_rshift(bn *src, size_t shift)
-// {
-//     size_t z = 32 - bn_clz(src);
-//     shift %= 32;  // only handle shift within 32 bits atm
-//     if (!shift)
-//         return;
-
-//     /* bit shift */
-//     for (int i = 0; i < (src->size - 1); i++)
-//         src->number[i] = src->number[i] >> shift | src->number[i + 1]
-//                                                        << (32 - shift);
-//     src->number[src->size - 1] >>= shift;
-
-//     if (shift >= z && src->size > 1)
-//         bn_resize(src, src->size - 1);
-// }
 
 /*
  * compare length
@@ -352,26 +334,26 @@ void bn_mult(const bn *a, const bn *b, bn *c)
 }
 
 /* calc n-th Fibonacci number and save into dest */
-// void bn_fib(bn *dest, unsigned int n)
-// {
-//     bn_resize(dest, 1);
-//     if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
-//         dest->number[0] = n;
-//         return;
-//     }
+void bn_fib(bn *dest, unsigned int n)
+{
+    bn_resize(dest, 1);
+    if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
+        dest->number[0] = n;
+        return;
+    }
 
-//     bn *a = bn_alloc(1);
-//     bn *b = bn_alloc(1);
-//     dest->number[0] = 1;
+    bn *a = bn_alloc(1);
+    bn *b = bn_alloc(1);
+    dest->number[0] = 1;
 
-//     for (unsigned int i = 1; i < n; i++) {
-//         bn_cpy(b, dest);
-//         bn_add(dest, a, dest);
-//         bn_swap(a, b);
-//     }
-//     bn_free(a);
-//     bn_free(b);
-// }
+    for (unsigned int i = 1; i < n; i++) {
+        bn_cpy(b, dest);
+        bn_add(dest, a, dest);
+        bn_swap(a, b);
+    }
+    bn_free(a);
+    bn_free(b);
+}
 
 /*
  * calc n-th Fibonacci number and save into dest
