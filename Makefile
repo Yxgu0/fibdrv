@@ -43,9 +43,3 @@ check: all
 	$(MAKE) unload
 	@diff -u out scripts/expected.txt && $(call pass)
 	@scripts/verify.py
-
-statistic: all
-	$(MAKE) unload
-	$(MAKE) load
-	sudo ./client_statistic > out
-	$(MAKE) unload
