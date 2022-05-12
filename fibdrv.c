@@ -25,27 +25,49 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-// static long long fib_sequence(long long n)
-// {
-//     long long f[2] = {0, 1};
+__attribute__((always_inline)) static inline void escape(void *p)
+{
+    __asm__ volatile("" : : "g"(p) : "memory");
+}
 
-//     for (unsigned long long i = 1UL << 63; i; i >>= 1) {
-//         // F(2k) = F(k)*[2F(k+1)-F(k)]
-//         long long k = f[0] * ((2 * f[1]) - f[0]);
-//         // F(2k+1) = F(k)^2 + F(k+1)^2
-//         long long k1 = f[0] * f[0] + f[1] * f[1];
+static long long fib_sequence(long long k)
+{
+    /* FIXME: use clz/ctz and fast algorithms to speed up */
+    long long f[k + 2];
 
-//         if (n & i) {
-//             f[0] = k1;      // F(2k+1)
-//             f[1] = k + k1;  // F(2k+2) = F(2k) + F(2k+1)
-//         } else {
-//             f[0] = k;   // F(2k)
-//             f[1] = k1;  // F(2k+1)
-//         }
-//     }
+    f[0] = 0;
+    f[1] = 1;
 
-//     return f[0];
-// }
+    for (int i = 2; i <= k; i++) {
+        f[i] = f[i - 1] + f[i - 2];
+    }
+
+    return f[k];
+}
+
+static long long fib_sequence_fdoubling(long long n)
+{
+    long long f[2] = {0, 1};
+
+    // for (unsigned long long i = 1UL << 63; i; i >>= 1) {
+    // for (unsigned long long i = 1UL << 6; i; i >>= 1) {
+    for (unsigned long long i = 1UL << (63 - __builtin_clzll(n)); i; i >>= 1) {
+        // F(2k) = F(k)*[2F(k+1)-F(k)]
+        long long k = f[0] * ((2 * f[1]) - f[0]);
+        // F(2k+1) = F(k)^2 + F(k+1)^2
+        long long k1 = f[0] * f[0] + f[1] * f[1];
+
+        if (n & i) {
+            f[0] = k1;      // F(2k+1)
+            f[1] = k + k1;  // F(2k+2) = F(2k) + F(2k+1)
+        } else {
+            f[0] = k;   // F(2k)
+            f[1] = k1;  // F(2k+1)
+        }
+    }
+
+    return f[0];
+}
 
 static int fib_open(struct inode *inode, struct file *file)
 {
@@ -68,15 +90,24 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    bn *fib = bn_alloc(1);
-    bn_fib_fdoubling(fib, *offset);
-    char *p = bn_to_string(fib);
-    size_t len = strlen(p) + 1;
-    size_t left = copy_to_user(buf, p, len);
-    bn_free(fib);
-    kfree(p);
+    // bn *fib = bn_alloc(1);
+    // bn_fib_fdoubling(fib, *offset);
+    // char *p = bn_to_string(fib);
+    // size_t len = strlen(p) + 1;
+    // size_t left = copy_to_user(buf, p, len);
+    // bn_free(fib);
+    // kfree(p);
 
-    return left;  // returns number of bytes that could not be copied
+    // return left;  // returns number of bytes that could not be copied
+
+    long long result = 0;
+
+    ktime_t kt = ktime_get();
+    result = fib_sequence_fdoubling(*offset);
+    kt = ktime_sub(ktime_get(), kt);
+    escape(&result);
+
+    return (ssize_t) ktime_to_ns(kt);
 }
 
 /*
@@ -84,33 +115,29 @@ static ssize_t fib_read(struct file *file,
  * and return the execution time.
  */
 static ssize_t fib_write(struct file *file,
-                         char *buf,
+                         const char *buf,
                          size_t mode,
                          loff_t *offset)
 {
-    bn *fib = bn_alloc(1);
-
     ktime_t kt;
+    long long result = 0;
+
     switch (mode) {
     case 0:
         kt = ktime_get();
-        bn_fib(fib, *offset);
+        result = fib_sequence(*offset);
         kt = ktime_sub(ktime_get(), kt);
+        escape(&result);
         break;
     case 1:
         kt = ktime_get();
-        bn_fib_fdoubling(fib, *offset);
+        result = fib_sequence_fdoubling(*offset);
         kt = ktime_sub(ktime_get(), kt);
+        escape(&result);
         break;
     default:
         return -1;  // unknown calculation mode, return -1 as error code
     }
-
-    char *p = bn_to_string(fib);
-    size_t len = strlen(p) + 1;
-    copy_to_user(buf, p, len);
-    bn_free(fib);
-    kfree(p);
 
     return ktime_to_ns(kt);
 }
