@@ -69,8 +69,9 @@ int main()
         result1 /= count1;
         result2 /= count2;
 
-
-        fprintf(fp, "%d %.5lf %.5lf\n", i, result1, result2);
+        // result 1 for interative version, result 2 for fast version
+        fprintf(fp, "%d %.5lf %.5lf, samples : %d, %d\n", i, result1, result2,
+                count1, count2);
     }
 
     fclose(fp);
