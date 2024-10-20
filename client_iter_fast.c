@@ -14,7 +14,7 @@ int main()
 {
     FILE *fp = fopen("./plot_iter_fast", "w");
     char buf[100];
-    int offset = 100;
+    int offset = 1000;
     int sampling_size = 1000;
 
     int fd = open(FIB_DEV, O_RDWR);
@@ -38,9 +38,9 @@ int main()
         // means
         for (int j = 0; j < sampling_size; j++) {
             read(fd, buf, FIB_ITER);
-            t1[j] = (double) write(fd, buf, 0); // iterative
+            t1[j] = (double) write(fd, buf, 0);  // iterative
             read(fd, buf, FIB_FAST);
-            t2[j] = (double) write(fd, buf, 0); // fast doubling
+            t2[j] = (double) write(fd, buf, 0);  // fast doubling
             mean1 += t1[j];
             mean2 += t2[j];
         }
