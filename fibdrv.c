@@ -24,6 +24,7 @@ static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
+static ktime_t kt;
 
 __attribute__((always_inline)) static inline void escape(void *p)
 {
@@ -84,53 +85,45 @@ static int fib_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-/* Calculate the fibonacci number at given offset */
+/* Calculate the fibonacci number at given offset with given mode */
 static ssize_t fib_read(struct file *file,
                         char *buf,
-                        size_t size,
+                        size_t mode,
                         loff_t *offset)
 {
-    bn *fib = bn_alloc(1);
-    bn_fib_fdoubling(fib, *offset);
-    // bn_fib(fib, *offset);
-    char *p = bn_to_string(fib);
+    bn *fbn = bn_alloc(1);
+    switch (mode) {
+    case 0:  // FIB_ITERATIVE
+        kt = ktime_get();
+        bn_fib(fbn, *offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    case 1:  // FIB_FAST
+        kt = ktime_get();
+        bn_fib_fdoubling(fbn, *offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    default:
+        return -1;
+    }
+    
+    char *p = bn_to_string(fbn);
     size_t len = strlen(p) + 1;
     size_t left = copy_to_user(buf, p, len);
-    bn_free(fib);
+    bn_free(fbn);
     kfree(p);
 
     return left;  // returns number of bytes that could not be copied
 }
 
 /*
- * Calculate the fibonacci number at given offset with given mode,
- * and return the execution time.
+ * Return the calculation time of previous fib_read() execution.
  */
 static ssize_t fib_write(struct file *file,
                          const char *buf,
-                         size_t mode,
+                         size_t size,
                          loff_t *offset)
 {
-    ktime_t kt;
-    long long result = 0;
-
-    switch (mode) {
-    case 0:  // FIB_ITERATIVE
-        kt = ktime_get();
-        result = fib_sequence(*offset);
-        kt = ktime_sub(ktime_get(), kt);
-        escape(&result);
-        break;
-    case 1:  // FIB_FAST
-        kt = ktime_get();
-        result = fib_sequence_fdoubling(*offset);
-        kt = ktime_sub(ktime_get(), kt);
-        escape(&result);
-        break;
-    default:
-        return -1;
-    }
-
     return ktime_to_ns(kt);
 }
 

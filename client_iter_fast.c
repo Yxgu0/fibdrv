@@ -7,13 +7,13 @@
 #include <unistd.h>
 
 #define FIB_DEV "/dev/fibonacci"
-#define FIB_ITERATIVE 0
+#define FIB_ITER 0
 #define FIB_FAST 1
 
 int main()
 {
-    FILE *fp = fopen("./plot_statistic", "w");
-    char write_buf[100];
+    FILE *fp = fopen("./plot_iter_fast", "w");
+    char buf[100];
     int offset = 100;
     int sampling_size = 1000;
 
@@ -37,8 +37,10 @@ int main()
 
         // means
         for (int j = 0; j < sampling_size; j++) {
-            t1[j] = (double) write(fd, write_buf, FIB_ITERATIVE);
-            t2[j] = (double) write(fd, write_buf, FIB_FAST);
+            read(fd, buf, FIB_ITER);
+            t1[j] = (double) write(fd, buf, 0); // iterative
+            read(fd, buf, FIB_FAST);
+            t2[j] = (double) write(fd, buf, 0); // fast doubling
             mean1 += t1[j];
             mean2 += t2[j];
         }
@@ -69,7 +71,6 @@ int main()
         result1 /= count1;
         result2 /= count2;
 
-        // result 1 for interative version, result 2 for fast version
         fprintf(fp, "%d %.5lf %.5lf, samples : %d, %d\n", i, result1, result2,
                 count1, count2);
     }

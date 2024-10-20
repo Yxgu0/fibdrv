@@ -14,9 +14,12 @@ sudo bash -c "echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo"
 make all
 make unload
 make load
-rm -f plot_statistic
-sudo taskset -c $CPUID ./client_statistic
-gnuplot scripts/plot_statistic.gp
+# rm -f plot_statistic
+# sudo taskset -c $CPUID ./client_statistic
+# gnuplot scripts/plot_statistic.gp
+rm -f plot_iter_fast
+sudo taskset -c $CPUID ./client_iter_fast
+gnuplot scripts/plot_iter_fast.gp
 make unload
 
 # restore the original system settings

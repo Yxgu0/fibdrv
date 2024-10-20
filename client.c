@@ -6,6 +6,8 @@
 #include <unistd.h>
 
 #define FIB_DEV "/dev/fibonacci"
+#define FIB_ITER 0
+#define FIB_FAST 1
 
 int main()
 {
@@ -21,7 +23,7 @@ int main()
 
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
-        long long left = read(fd, buf, 1);
+        long long left = read(fd, buf, FIB_FAST);
         if(left){
             printf("Reading from " FIB_DEV
                " at offset %d, returned message was truncated.\n", i);
