@@ -84,34 +84,26 @@ static int fib_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-/* calculate the fibonacci number at given offset */
+/* Calculate the fibonacci number at given offset */
 static ssize_t fib_read(struct file *file,
                         char *buf,
                         size_t size,
                         loff_t *offset)
 {
-    // bn *fib = bn_alloc(1);
-    // bn_fib_fdoubling(fib, *offset);
-    // char *p = bn_to_string(fib);
-    // size_t len = strlen(p) + 1;
-    // size_t left = copy_to_user(buf, p, len);
-    // bn_free(fib);
-    // kfree(p);
+    bn *fib = bn_alloc(1);
+    bn_fib_fdoubling(fib, *offset);
+    // bn_fib(fib, *offset);
+    char *p = bn_to_string(fib);
+    size_t len = strlen(p) + 1;
+    size_t left = copy_to_user(buf, p, len);
+    bn_free(fib);
+    kfree(p);
 
-    // return left;  // returns number of bytes that could not be copied
-
-    long long result = 0;
-
-    ktime_t kt = ktime_get();
-    result = fib_sequence_fdoubling(*offset);
-    kt = ktime_sub(ktime_get(), kt);
-    escape(&result);
-
-    return (ssize_t) ktime_to_ns(kt);
+    return left;  // returns number of bytes that could not be copied
 }
 
 /*
- * calculate the fibonacci number at given offset with given mode,
+ * Calculate the fibonacci number at given offset with given mode,
  * and return the execution time.
  */
 static ssize_t fib_write(struct file *file,
@@ -123,20 +115,20 @@ static ssize_t fib_write(struct file *file,
     long long result = 0;
 
     switch (mode) {
-    case 0:
+    case 0:  // FIB_ITERATIVE
         kt = ktime_get();
         result = fib_sequence(*offset);
         kt = ktime_sub(ktime_get(), kt);
         escape(&result);
         break;
-    case 1:
+    case 1:  // FIB_FAST
         kt = ktime_get();
         result = fib_sequence_fdoubling(*offset);
         kt = ktime_sub(ktime_get(), kt);
         escape(&result);
         break;
     default:
-        return -1;  // unknown calculation mode, return -1 as error code
+        return -1;
     }
 
     return ktime_to_ns(kt);

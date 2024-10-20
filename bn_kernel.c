@@ -18,30 +18,30 @@
 #define DIV_ROUNDUP(x, len) (((x) + (len) -1) / (len))
 #endif
 
-/* count leading zeros of src*/
+/* Count the leading zeros of src*/
 static int bn_clz(const bn *src)
 {
-    int cnt = 0;
+    int count = 0;
     for (int i = src->size - 1; i >= 0; i--) {
         if (src->number[i]) {
             // prevent undefined behavior when src = 0
-            cnt += __builtin_clz(src->number[i]);
-            return cnt;
+            count += __builtin_clz(src->number[i]);
+            return count;
         } else {
-            cnt += 32;
+            count += 32;
         }
     }
-    return cnt;
+    return count;
 }
 
-/* count the digits of most significant bit */
+/* Count the digits of most significant bit */
 static int bn_msb(const bn *src)
 {
     return src->size * 32 - bn_clz(src);
 }
 
 /*
- * output bn to decimal string
+ * Output bn to decimal string
  * Note: the returned string should be freed with the kfree()
  */
 char *bn_to_string(const bn *src)
@@ -79,7 +79,7 @@ char *bn_to_string(const bn *src)
 }
 
 /*
- * alloc a bn structure with the given size
+ * Allocate a bn structure with the given size
  * the value is initialized to +0
  */
 bn *bn_alloc(size_t size)
@@ -93,7 +93,7 @@ bn *bn_alloc(size_t size)
 }
 
 /*
- * free entire bn data structure
+ * Free entire bn data structure
  * return 0 on success, -1 on error
  */
 int bn_free(bn *src)
@@ -106,7 +106,7 @@ int bn_free(bn *src)
 }
 
 /*
- * resize bn
+ * Resize bn
  * return 0 on success, -1 on error
  * data lose IS neglected when shinking the size
  */
@@ -129,7 +129,7 @@ static int bn_resize(bn *src, size_t size)
 }
 
 /*
- * copy the value from src to dest
+ * Copy the value from src to dest
  * return 0 on success, -1 on error
  */
 int bn_cpy(bn *dest, bn *src)
@@ -141,7 +141,7 @@ int bn_cpy(bn *dest, bn *src)
     return 0;
 }
 
-/* swap bn ptr */
+/* Swap bn ptr */
 void bn_swap(bn *a, bn *b)
 {
     bn tmp = *a;
@@ -149,7 +149,7 @@ void bn_swap(bn *a, bn *b)
     *b = tmp;
 }
 
-/* left bit shift on bn (maximun shift 31) */
+/* Left bit shift on bn (maximun shift 31) */
 void bn_lshift(bn *src, size_t shift)
 {
     size_t z = bn_clz(src);
@@ -167,7 +167,7 @@ void bn_lshift(bn *src, size_t shift)
 }
 
 /*
- * compare length
+ * Compare length
  * return 1 if |a| > |b|
  * return -1 if |a| < |b|
  * return 0 if |a| = |b|
@@ -192,7 +192,7 @@ int bn_cmp(const bn *a, const bn *b)
 /* |c| = |a| + |b| */
 static void bn_do_add(const bn *a, const bn *b, bn *c)
 {
-    // max digits = max(sizeof(a) + sizeof(b)) + 1
+    // max digits = max(sizeof(a), sizeof(b)) + 1
     int d = MAX(bn_msb(a), bn_msb(b)) + 1;
     d = DIV_ROUNDUP(d, 32) + !d;
     bn_resize(c, d);  // round up, min size = 1
@@ -333,7 +333,7 @@ void bn_mult(const bn *a, const bn *b, bn *c)
     }
 }
 
-/* calc n-th Fibonacci number and save into dest */
+/* Calculate F(n) and save it to dest */
 void bn_fib(bn *dest, unsigned int n)
 {
     bn_resize(dest, 1);
@@ -342,23 +342,22 @@ void bn_fib(bn *dest, unsigned int n)
         return;
     }
 
-    bn *a = bn_alloc(1);
-    bn *b = bn_alloc(1);
-    dest->number[0] = 1;
+    bn *pprev = bn_alloc(1);
+    bn *prev  = bn_alloc(1);
+    bn *curr  = dest;
+    curr->number[0] = 1;
 
     for (unsigned int i = 1; i < n; i++) {
-        bn_cpy(b, dest);
-        bn_add(dest, a, dest);
-        bn_swap(a, b);
+        bn_swap(pprev, prev);
+        bn_cpy(prev, curr);
+        bn_add(pprev, prev, curr);
     }
-    bn_free(a);
-    bn_free(b);
+
+    bn_free(pprev);
+    bn_free(prev);
 }
 
-/*
- * calc n-th Fibonacci number and save into dest
- * using fast doubling algorithm
- */
+/* Calculate F(n) by fast doubling and save it to dest */
 void bn_fib_fdoubling(bn *dest, unsigned int n)
 {
     bn_resize(dest, 1);
