@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "bn.h"
+#include "bn_pool.h"
 
 /* ------------------------ Helper MACROs ------------------------ */
 
@@ -21,20 +22,20 @@
 #define DIV_ROUNDUP(x, len) (((x) + (len) -1) / (len))
 #endif
 
-#define NEW_NODE(head, val)                        \
-    ({                                             \
-        _bn_node *node = malloc(sizeof(_bn_node)); \
-        if (node) {                                \
-            node->value = (val);                   \
-            list_add_tail(&node->link, (head));    \
-        }                                          \
+#define NEW_NODE(head, val)                           \
+    ({                                                \
+        _bn_node *node = mp_malloc(sizeof(_bn_node)); \
+        if (node) {                                   \
+            node->value = (val);                      \
+            list_add_tail(&node->link, (head));       \
+        }                                             \
     })
 
 #define REMOVE_NODE(head)                                          \
     ({                                                             \
         _bn_node *node = list_entry((head)->prev, _bn_node, link); \
         list_del((head)->prev);                                    \
-        free(node);                                                \
+        mp_free(node);                                             \
     })
 
 #define list_for_each_tail_entry(entry, head, member)                  \
@@ -164,7 +165,7 @@ bn *bn_alloc(size_t size)
     bn *new = malloc(sizeof(bn));
     new->size = size;
     new->sign = 0;
-    new->number_head = malloc(sizeof(_bn_node));
+    new->number_head = mp_malloc(sizeof(_bn_node));
     INIT_LIST_HEAD(&new->number_head->link);
     for (int i = 0; i < size; i++) {
         NEW_NODE(&new->number_head->link, 0);
@@ -182,11 +183,14 @@ int bn_free(bn *src)
     if (src == NULL)
         return -1;
 
-    _bn_node *head_node = src->number_head, *node = NULL;
-    list_for_each_entry (node, &head_node->link, link) {
-        free(node);
-    }
-    free(head_node);
+    // _bn_node *head_node = src->number_head, *node = NULL;
+    // list_for_each_entry (node, &head_node->link, link) {
+    //     mp_free(node);
+    // }
+    struct list_head *head = &src->number_head->link;
+    while (!list_empty(head))
+        mp_free(list_last_entry(head, _bn_node, link));
+    mp_free(list_entry(head, _bn_node, link));
     free(src);
 
     return 0;

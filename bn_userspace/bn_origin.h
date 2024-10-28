@@ -1,9 +1,4 @@
-#ifndef BN_H
-#define BN_H
-
 #include <stdint.h>
-
-#include "list.h"
 
 /*
  * Bignum data structure
@@ -11,14 +6,9 @@
  * number[size - 1] contains most significant bits
  * sign = 1 for negative number
  */
-typedef struct __bn_node {
-    uint32_t value;
-    struct list_head link;
-} _bn_node;
-
 typedef struct _bn {
-    _bn_node *number_head;
-    size_t size;
+    unsigned int *number;
+    unsigned int size;
     int sign;
 } bn;
 
@@ -60,19 +50,17 @@ void bn_swap(bn *a, bn *b);
 /* Left bit shift on bn (maximun shift 31) */
 void bn_lshift(bn *src, size_t shift);
 
-/* slr += lgr */
-void bn_add_to_smaller(bn *slr, const bn *lgr);
-
-/* lgr -= slr */
-void bn_sub_from_larger(bn *lgr, const bn *slr);
-
 /* c = a + b */
-void bn_mult(bn *c, const bn *a, const bn *b);
+void bn_add(const bn *a, const bn *b, bn *c);
+
+/* c = a - b */
+void bn_sub(const bn *a, const bn *b, bn *c);
+
+/* c = a x b */
+void bn_mult(const bn *a, const bn *b, bn *c);
 
 /* Calculate F(n) and save it to dest */
 void bn_fib(bn *dest, unsigned int n);
 
 /* Calculate F(n) by fast doubling and save it to dest */
 void bn_fib_fdoubling(bn *dest, unsigned int n);
-
-#endif
