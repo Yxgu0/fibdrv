@@ -5,8 +5,9 @@
 #include <time.h>
 
 #include "bn.h"
+#include "bn_pool.h"
 
-#define ITER 100
+#define ITER 1000
 
 int main(int argc, char *argv[])
 {
@@ -28,5 +29,6 @@ int main(int argc, char *argv[])
     }
 
     bn_free(fbn);
+    mp_del();
     return 0;
 }
