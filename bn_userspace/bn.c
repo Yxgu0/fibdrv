@@ -183,13 +183,12 @@ int bn_free(bn *src)
     if (src == NULL)
         return -1;
 
-    // _bn_node *head_node = src->number_head, *node = NULL;
-    // list_for_each_entry (node, &head_node->link, link) {
-    //     mp_free(node);
-    // }
     struct list_head *head = &src->number_head->link;
-    while (!list_empty(head))
-        mp_free(list_last_entry(head, _bn_node, link));
+    while (!list_empty(head)) {
+        _bn_node *node = list_entry(head->prev, _bn_node, link);
+        list_del(head->prev);
+        mp_free(node);
+    }
     mp_free(list_entry(head, _bn_node, link));
     free(src);
 

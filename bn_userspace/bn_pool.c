@@ -25,10 +25,9 @@ void mp_free(void *src)
     struct list_head *node = &((_bn_node *) src)->link;
 
     if (!mp.free_list) {
-        list_del_init(node);
+        INIT_LIST_HEAD(node);
         mp.free_list = list_entry(node, _bn_node, link);
     } else {
-        list_del_init(node);
         list_add_tail(node, &mp.free_list->link);
     }
 }

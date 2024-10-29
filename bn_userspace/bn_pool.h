@@ -14,8 +14,8 @@ typedef struct {
 static _memory_pool mp;
 
 #ifndef DISABLE_MEMORY_POOLING
-void *mp_malloc();
-void mp_free();
+void *mp_malloc(uint32_t size);
+void mp_free(void *src);
 #else
 #define mp_malloc(p) malloc((p));
 #define mp_free(p) free((p));
