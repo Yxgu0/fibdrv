@@ -1,4 +1,4 @@
-CC := gcc
+CC := gcc -O2
 CFLAGS := -Wall
 
 OBJS := bn.o bn_pool.o
@@ -24,4 +24,4 @@ bench_origin: $(OBJS_O)
 	$(CC) -o $@ $(CFLAGS) -c -MMD -MF .$@.d $<
 
 clean: 
-	rm $(OBJS) $(OBJS_B) fib test bench
+	rm $(OBJS) $(OBJS_B) test fib bench fib_origin bench_origin
