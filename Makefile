@@ -3,7 +3,7 @@ TARGET_MODULE := fibdrv_new
 
 obj-m := $(TARGET_MODULE).o 
 # list all objects used to link the final module fibdrv.ko
-$(TARGET_MODULE)-objs := fibdrv.o bn_kernel.o
+$(TARGET_MODULE)-objs := fibdrv.o bn_kernel.o bn_pool.o
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement
 
 KDIR := /lib/modules/$(shell uname -r)/build
@@ -11,7 +11,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client client_iter_fast
+all: $(GIT_HOOKS) client client_iter_fast client_1million_fast
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -29,6 +29,8 @@ unload:
 client: client.c
 	$(CC) -o $@ $^
 client_iter_fast: client_iter_fast.c
+	$(CC) -o $@ $^ -lm
+client_1million_fast: client_1million_fast.c
 	$(CC) -o $@ $^ -lm
 
 PRINTF = env printf

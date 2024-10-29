@@ -1,12 +1,24 @@
+#ifndef BN_KERNEL_H
+#define BN_KERNEL_H
+
+#include <linux/list.h>
+// typedef uint32_t unsigned long long;
+// typedef int32_t long long;
+
 /*
  * Bignum data structure
  * number[0] contains least significant bits
  * number[size - 1] contains most significant bits
  * sign = 1 for negative number
  */
+typedef struct __bn_node {
+    uint32_t value;
+    struct list_head link;
+} _bn_node;
+
 typedef struct _bn {
-    unsigned int *number;
-    unsigned int size;
+    _bn_node *number_head;
+    size_t size;
     int sign;
 } bn;
 
@@ -48,17 +60,19 @@ void bn_swap(bn *a, bn *b);
 /* Left bit shift on bn (maximun shift 31) */
 void bn_lshift(bn *src, size_t shift);
 
+/* slr += lgr */
+void bn_add_to_smaller(bn *slr, const bn *lgr);
+
+/* lgr -= slr */
+void bn_sub_from_larger(bn *lgr, const bn *slr);
+
 /* c = a + b */
-void bn_add(const bn *a, const bn *b, bn *c);
-
-/* c = a - b */
-void bn_sub(const bn *a, const bn *b, bn *c);
-
-/* c = a x b */
-void bn_mult(const bn *a, const bn *b, bn *c);
+void bn_mult(bn *c, const bn *a, const bn *b);
 
 /* Calculate F(n) and save it to dest */
 void bn_fib(bn *dest, unsigned int n);
 
 /* Calculate F(n) by fast doubling and save it to dest */
 void bn_fib_fdoubling(bn *dest, unsigned int n);
+
+#endif

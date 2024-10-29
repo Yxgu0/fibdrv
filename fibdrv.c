@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 
 #include "bn_kernel.h"
+#include "bn_pool.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -217,6 +218,7 @@ failed_cdev:
 
 static void __exit exit_fib_dev(void)
 {
+    mp_del();
     mutex_destroy(&fib_mutex);
     device_destroy(fib_class, fib_dev);
     class_destroy(fib_class);

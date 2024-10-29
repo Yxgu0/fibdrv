@@ -1,8 +1,14 @@
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/types.h>
 
 #include "bn_kernel.h"
+#include "bn_pool.h"
+
+int DEBUG = 0;
+
+/* ------------------------ Helper MACROs ------------------------ */
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #ifndef SWAP
@@ -18,19 +24,47 @@
 #define DIV_ROUNDUP(x, len) (((x) + (len) -1) / (len))
 #endif
 
-/* Count the leading zeros of src*/
+#define NEW_NODE(head, val)                           \
+    ({                                                \
+        _bn_node *node = mp_malloc(sizeof(_bn_node)); \
+        if (node) {                                   \
+            node->value = (val);                      \
+            list_add_tail(&node->link, (head));       \
+        }                                             \
+    })
+
+#define REMOVE_NODE(head)                                          \
+    ({                                                             \
+        _bn_node *node = list_entry((head)->prev, _bn_node, link); \
+        list_del((head)->prev);                                    \
+        mp_free(node);                                             \
+    })
+
+#define list_for_each_tail_entry(entry, head, member)                  \
+    for (entry = list_entry((head)->prev, __typeof__(*entry), member); \
+         &entry->member != (head);                                     \
+         entry = list_entry(entry->member.prev, __typeof__(*entry), member))
+
+/* ------------------------ Helper functions ------------------------ */
+
+/* Count the leading zeros of src */
 static int bn_clz(const bn *src)
 {
     int count = 0;
-    for (int i = src->size - 1; i >= 0; i--) {
-        if (src->number[i]) {
+    struct list_head *head = &src->number_head->link;
+    _bn_node *node = NULL;
+
+    list_for_each_tail_entry(node, head, link)
+    {
+        if (node->value) {
             // prevent undefined behavior when src = 0
-            count += __builtin_clz(src->number[i]);
+            count += __builtin_clz(node->value);
             return count;
         } else {
             count += 32;
         }
     }
+
     return count;
 }
 
@@ -38,71 +72,6 @@ static int bn_clz(const bn *src)
 static int bn_msb(const bn *src)
 {
     return src->size * 32 - bn_clz(src);
-}
-
-/*
- * Output bn to decimal string
- * Note: the returned string should be freed with the kfree()
- */
-char *bn_to_string(const bn *src)
-{
-    // log10(x) = log2(x) / log2(10) ~= log2(x) / 3.322
-    size_t len = (8 * sizeof(int) * src->size) / 3 + 2 + src->sign;
-    char *s = kmalloc(len, GFP_KERNEL);
-    char *p = s;
-
-    memset(s, '0', len - 1);
-    s[len - 1] = '\0';
-
-    /* src.number[0] contains least significant bits */
-    for (int i = src->size - 1; i >= 0; i--) {
-        /* walk through every bit of bn */
-        for (unsigned int d = 1U << 31; d; d >>= 1) {
-            /* binary -> decimal string */
-            int carry = !!(d & src->number[i]);
-            for (int j = len - 2; j >= 0; j--) {
-                s[j] += s[j] - '0' + carry;
-                carry = (s[j] > '9');
-                if (carry)
-                    s[j] -= 10;
-            }
-        }
-    }
-    // skip leading zero
-    while (p[0] == '0' && p[1] != '\0') {
-        p++;
-    }
-    if (src->sign)
-        *(--p) = '-';
-    memmove(s, p, strlen(p) + 1);
-    return s;
-}
-
-/*
- * Allocate a bn structure with the given size
- * the value is initialized to +0
- */
-bn *bn_alloc(size_t size)
-{
-    bn *new = (bn *) kmalloc(sizeof(bn), GFP_KERNEL);
-    new->number = kmalloc(sizeof(int) * size, GFP_KERNEL);
-    memset(new->number, 0, sizeof(int) * size);
-    new->size = size;
-    new->sign = 0;
-    return new;
-}
-
-/*
- * Free entire bn data structure
- * return 0 on success, -1 on error
- */
-int bn_free(bn *src)
-{
-    if (src == NULL)
-        return -1;
-    kfree(src->number);
-    kfree(src);
-    return 0;
 }
 
 /*
@@ -114,17 +83,117 @@ static int bn_resize(bn *src, size_t size)
 {
     if (!src)
         return -1;
-    if (size == src->size)
-        return 0;
-    if (size == 0)  // prevent krealloc(0) = kfree, which will cause problem
+    if (size == 0)  // prevent krealloc(0) = free, which will cause problem
         return bn_free(src);
-    src->number = krealloc(src->number, sizeof(int) * size, GFP_KERNEL);
-    if (!src->number) {  // realloc fails
-        return -1;
+
+    if (size > src->size) {
+        for (int i = 0; i < size - src->size; i++)
+            NEW_NODE(&src->number_head->link, 0);
+        src->size = size;
+    } else if (size < src->size) {
+        for (int i = 0; i < src->size - size; i++)
+            REMOVE_NODE(&src->number_head->link);
+        src->size = size;
+    } else if (size == src->size) {
+        return 0;
     }
-    if (size > src->size)
-        memset(src->number + src->size, 0, sizeof(int) * (size - src->size));
-    src->size = size;
+
+    return 0;
+}
+
+/* Set a 32-bits unsigned value to the src
+ * return 0 on success, -1 on error
+ */
+static int bn_set_value(bn *src, uint32_t val)
+{
+    int result = bn_resize(src, 1);
+    if (result < 0)
+        return result;
+
+    _bn_node *node = list_first_entry(&src->number_head->link, _bn_node, link);
+    node->value = val;
+
+    return 1;
+}
+
+/* ------------------------ bn API ------------------------ */
+
+/*
+ * Output bn to decimal string
+ * Note: the returned string should be freed with the kfree()
+ */
+char *bn_to_string(const bn *src)
+{
+    // log10(x) = log2(x) / log2(10) ~= log2(x) / 3.322
+    size_t len = (8 * sizeof(int) * src->size) / 3 + 2 + src->sign;
+    char *s = kmalloc(len, GFP_KERNEL);
+    char *p = s;
+    memset(s, '0', len - 1);
+    s[len - 1] = '\0';
+
+    struct list_head *head = &src->number_head->link;
+    _bn_node *node = NULL;
+    list_for_each_tail_entry(node, head, link)
+    {
+        for (uint32_t d = 1U << 31; d; d >>= 1) {
+            int carry = !!(d & node->value);
+            for (int j = len - 2; j >= 0; j--) {
+                s[j] += s[j] - '0' + carry;
+                carry = (s[j] > '9');
+                if (carry)
+                    s[j] -= 10;
+            }
+        }
+    }
+
+    // skip leading zero
+    while (p[0] == '0' && p[1] != '\0')
+        p++;
+    if (src->sign)
+        *(--p) = '-';
+    memmove(s, p, strlen(p) + 1);
+
+    return s;
+}
+
+/*
+ * Allocate a bn structure with @size list nodes.
+ * The value of @size list nodes are initialized to +0
+ * Note : there will be @size+1 list nodes in total,
+          the additional one is the list head.
+ */
+bn *bn_alloc(size_t size)
+{
+    bn *new = kmalloc(sizeof(bn), GFP_KERNEL);
+    new->size = size;
+    new->sign = 0;
+    new->number_head = mp_malloc(sizeof(_bn_node));
+    INIT_LIST_HEAD(&new->number_head->link);
+    for (int i = 0; i < size; i++) {
+        NEW_NODE(&new->number_head->link, 0);
+    }
+
+    return new;
+}
+
+/*
+ * Free entire bn data structure
+ * return 0 on success, -1 on error
+ */
+int bn_free(bn *src)
+{
+    if (src == NULL)
+        return -1;
+
+    struct list_head *head = &src->number_head->link;
+    while (!list_empty(head)) {
+        _bn_node *node = list_entry(head->prev, _bn_node, link);
+        list_del(head->prev);
+        mp_free(node);
+    }
+    mp_free(list_entry(head, _bn_node, link));
+    kfree(src);
+
     return 0;
 }
 
@@ -136,9 +205,48 @@ int bn_cpy(bn *dest, bn *src)
 {
     if (bn_resize(dest, src->size) < 0)
         return -1;
+
+    struct list_head *head = &dest->number_head->link,
+                     *dlink = dest->number_head->link.next,
+                     *slink = src->number_head->link.next;
+    for (; dlink != head; dlink = dlink->next, slink = slink->next) {
+        _bn_node *dnode = list_entry(dlink, _bn_node, link),
+                 *snode = list_entry(slink, _bn_node, link);
+        dnode->value = snode->value;
+    }
     dest->sign = src->sign;
-    memcpy(dest->number, src->number, src->size * sizeof(int));
+
     return 0;
+}
+
+/*
+ * Compare length
+ * return 1 if |a| > |b|
+ * return -1 if |a| < |b|
+ * return 0 if |a| = |b|
+ */
+int bn_cmp(const bn *a, const bn *b)
+{
+    if (a->size > b->size) {
+        return 1;
+    } else if (a->size < b->size) {
+        return -1;
+    } else {
+        // Traverse from tail node, which contain the most significant bit
+        struct list_head *head = &a->number_head->link,
+                         *alink = a->number_head->link.prev,
+                         *blink = b->number_head->link.prev;
+        for (; alink != head; alink = alink->prev, blink = blink->prev) {
+            _bn_node *anode = list_entry(alink, _bn_node, link),
+                     *bnode = list_entry(blink, _bn_node, link);
+            if (anode->value > bnode->value)
+                return 1;
+            if (anode->value < bnode->value)
+                return -1;
+        }
+
+        return 0;
+    }
 }
 
 /* Swap bn ptr */
@@ -159,143 +267,80 @@ void bn_lshift(bn *src, size_t shift)
 
     if (shift > z)
         bn_resize(src, src->size + 1);
-    /* bit shift */
-    for (int i = src->size - 1; i > 0; i--)
-        src->number[i] =
-            src->number[i] << shift | src->number[i - 1] >> (32 - shift);
-    src->number[0] <<= shift;
-}
 
-/*
- * Compare length
- * return 1 if |a| > |b|
- * return -1 if |a| < |b|
- * return 0 if |a| = |b|
- */
-int bn_cmp(const bn *a, const bn *b)
-{
-    if (a->size > b->size) {
-        return 1;
-    } else if (a->size < b->size) {
-        return -1;
-    } else {
-        for (int i = a->size - 1; i >= 0; i--) {
-            if (a->number[i] > b->number[i])
-                return 1;
-            if (a->number[i] < b->number[i])
-                return -1;
-        }
-        return 0;
-    }
-}
-
-/* |c| = |a| + |b| */
-static void bn_do_add(const bn *a, const bn *b, bn *c)
-{
-    // max digits = max(sizeof(a), sizeof(b)) + 1
-    int d = MAX(bn_msb(a), bn_msb(b)) + 1;
-    d = DIV_ROUNDUP(d, 32) + !d;
-    bn_resize(c, d);  // round up, min size = 1
-
-    unsigned long long int carry = 0;
-    for (int i = 0; i < c->size; i++) {
-        unsigned int tmp1 = (i < a->size) ? a->number[i] : 0;
-        unsigned int tmp2 = (i < b->size) ? b->number[i] : 0;
-        carry += (unsigned long long int) tmp1 + tmp2;
-        c->number[i] = carry;
+    uint64_t carry = 0;
+    struct list_head *head = &src->number_head->link;
+    _bn_node *node = NULL;
+    list_for_each_entry (node, head, link) {
+        carry = ((uint64_t) node->value << shift) + carry;
+        node->value = carry;  // assigning lower 32 bits
         carry >>= 32;
     }
+}
+/* slr += lgr
+ * Note : assuming size of slr <= size of lgr
+ */
+void bn_add_to_smaller(bn *slr, const bn *lgr)
+{
+    uint32_t carry = 0;
+    struct list_head *shead = &slr->number_head->link,
+                     *lhead = &lgr->number_head->link, **s = &shead->next,
+                     **l = &lhead->next;
 
-    if (!c->number[c->size - 1] && c->size > 1)
-        bn_resize(c, c->size - 1);
+    for (;; l = &(*l)->next, s = &(*s)->next) {
+        if (*s == shead) {
+            if (*l == lhead) {
+                if (carry) {
+                    NEW_NODE(shead, 1);
+                    slr->size++;
+                }
+                break;
+            }
+
+            NEW_NODE(shead, 0);
+            slr->size++;
+        }
+
+        _bn_node *snode = list_entry(*s, _bn_node, link),
+                 *lnode = list_entry(*l, _bn_node, link);
+
+        uint64_t res = (uint64_t) snode->value + lnode->value + carry;
+        snode->value = res;  // assigning lower 32 bits
+        carry = (res >> 32);
+    }
 }
 
-/*
- * |c| = |a| - |b|
- * Note: |a| > |b| must be true
+/* lgr -= slr
+ * Note : assuming size of lgr >= size of slr
  */
-static void bn_do_sub(const bn *a, const bn *b, bn *c)
+void bn_sub_from_larger(bn *lgr, const bn *slr)
 {
-    // max digits = max(sizeof(a) + sizeof(b))
-    int d = MAX(a->size, b->size);
-    bn_resize(c, d);
+    int borrow = 0;
+    struct list_head *shead = &slr->number_head->link,
+                     *lhead = &lgr->number_head->link, *slink = shead->next,
+                     *llink = lhead->next;
+    for (; slink != shead; slink = slink->next, llink = llink->next) {
+        _bn_node *snode = list_entry(slink, _bn_node, link),
+                 *lnode = list_entry(llink, _bn_node, link);
 
-    long long int borrow = 0;
-    for (int i = 0; i < c->size; i++) {
-        unsigned int tmp1 = (i < a->size) ? a->number[i] : 0;
-        unsigned int tmp2 = (i < b->size) ? b->number[i] : 0;
+        int64_t result = (int64_t) lnode->value - snode->value - borrow;
+        lnode->value = result;  // truncate 64-bits negative to 32-bits positive
 
-        borrow = (long long int) tmp1 - tmp2 - borrow;
-        if (borrow < 0) {
-            // truncate 64-bits negative int to 32-bits negative int
-            c->number[i] = borrow + (1LL << 32);
+        if (result < 0)
             borrow = 1;
-        } else {
-            c->number[i] = borrow;
+        else
             borrow = 0;
-        }
+    }
+    if (borrow) {
+        _bn_node *lnode = list_entry(llink, _bn_node, link);
+        lnode->value--;
     }
 
-    d = bn_clz(c) / 32;
-    if (d == c->size)
-        --d;
-    bn_resize(c, c->size - d);
-}
-
-/*
- * c = a + b
- * Note: work for c == a or c == b
- */
-void bn_add(const bn *a, const bn *b, bn *c)
-{
-    if (a->sign == b->sign) {  // both positive or negative
-        bn_do_add(a, b, c);
-        c->sign = a->sign;
-    } else {          // different sign
-        if (a->sign)  // let a > 0, b < 0
-            SWAP(a, b);
-        int cmp = bn_cmp(a, b);
-        if (cmp > 0) {
-            /* |a| > |b| and b < 0, hence c = a - |b| */
-            bn_do_sub(a, b, c);
-            c->sign = 0;
-        } else if (cmp < 0) {
-            /* |a| < |b| and b < 0, hence c = -(|b| - |a|) */
-            bn_do_sub(b, a, c);
-            c->sign = 1;
-        } else {
-            /* |a| == |b| */
-            bn_resize(c, 1);
-            c->number[0] = 0;
-            c->sign = 0;
-        }
-    }
-}
-
-/*
- * c = a - b
- * Note: work for c == a or c == b
- */
-void bn_sub(const bn *a, const bn *b, bn *c)
-{
-    /* xor the sign bit of b and let bn_add handle it */
-    bn tmp = *b;
-    tmp.sign ^= 1;  // a - b = a + (-b)
-    bn_add(a, &tmp, c);
-}
-
-/* c += x, starting from offset */
-static void bn_mult_add(bn *c, int offset, unsigned long long int x)
-{
-    unsigned long long int carry = 0;
-    for (int i = offset; i < c->size; i++) {
-        carry += c->number[i] + (x & 0xFFFFFFFF);
-        c->number[i] = carry;
-        carry >>= 32;
-        x >>= 32;
-        if (!x && !carry)  // done
-            return;
-    }
+    // remove empty tail node, min node size = 1
+    int e = bn_clz(lgr) / 32;
+    if (e == lgr->size)
+        --e;
+    bn_resize(lgr, lgr->size - e);
 }
 
 /*
@@ -303,13 +348,14 @@ static void bn_mult_add(bn *c, int offset, unsigned long long int x)
  * Note: work for c == a or c == b
  * using the simple quadratic-time algorithm (long multiplication)
  */
-void bn_mult(const bn *a, const bn *b, bn *c)
+void bn_mult(bn *c, const bn *a, const bn *b)
 {
     // max digits = sizeof(a) + sizeof(b))
     int d = bn_msb(a) + bn_msb(b);
     d = DIV_ROUNDUP(d, 32) + !d;  // round up, min size = 1
+
+    // make it work properly when c == a or c == b
     bn *tmp;
-    /* make it work properly when c == a or c == b */
     if (c == a || c == b) {
         tmp = c;  // save c
         c = bn_alloc(d);
@@ -318,14 +364,46 @@ void bn_mult(const bn *a, const bn *b, bn *c)
         bn_resize(c, d);
     }
 
-    for (int i = 0; i < a->size; i++) {
-        for (int j = 0; j < b->size; j++) {
-            unsigned long long int carry = 0;
-            carry = (unsigned long long int) a->number[i] * b->number[j];
-            bn_mult_add(c, i + j, carry);
+    struct list_head *ahead = &a->number_head->link,
+                     *bhead = &b->number_head->link,
+                     *chead = &c->number_head->link;
+    _bn_node *anode = NULL, *bnode = NULL, *cnode = NULL;
+
+    // for each node in a[i], calculate b * a[i], the result is stored in c
+    uint64_t carry = 0;
+    int offset = -1;
+    list_for_each_entry (anode, ahead, link) {
+        struct list_head *clink = chead->next;
+        offset++;
+        for (int i = 0; i < offset; i++)
+            clink = clink->next;
+
+        list_for_each_entry (bnode, bhead, link) {
+            cnode = list_entry(clink, _bn_node, link);
+            carry =
+                (uint64_t) anode->value * bnode->value + cnode->value + carry;
+            cnode->value = carry;  // assigning lower 32 bits
+
+            clink = clink->next;
+            carry >>= 32;
+        }
+        while (carry) {
+            cnode = list_entry(clink, _bn_node, link);
+            carry = (uint64_t) cnode->value + carry;
+            cnode->value = carry;  // assigning lower 32 bits
+
+            clink = clink->next;
+            carry >>= 32;
         }
     }
+
     c->sign = a->sign ^ b->sign;
+
+    // remove empty tail node, min node size = 1
+    int e = bn_clz(c) / 32;
+    if (e == c->size)
+        --e;
+    bn_resize(c, c->size - e);
 
     if (tmp) {
         bn_cpy(tmp, c);  // restore c
@@ -334,42 +412,42 @@ void bn_mult(const bn *a, const bn *b, bn *c)
 }
 
 /* Calculate F(n) and save it to dest */
-void bn_fib(bn *dest, unsigned int n)
+void bn_fib(bn *dest, uint32_t n)
 {
-    bn_resize(dest, 1);
     if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
-        dest->number[0] = n;
+        bn_resize(dest, 1);
+        bn_set_value(dest, n);
         return;
     }
 
-    bn *pprev = bn_alloc(1);
-    bn *prev  = bn_alloc(1);
-    bn *curr  = dest;
-    curr->number[0] = 1;
+    bn *prev = bn_alloc(1);
+    bn *curr = bn_alloc(1);
+    bn_set_value(prev, 0);
+    bn_set_value(curr, 1);
 
     for (unsigned int i = 1; i < n; i++) {
-        bn_swap(pprev, prev);
-        bn_cpy(prev, curr);
-        bn_add(pprev, prev, curr);
+        bn_add_to_smaller(prev, curr);
+        bn_swap(prev, curr);
     }
 
-    bn_free(pprev);
+    bn_cpy(dest, curr);
     bn_free(prev);
+    bn_free(curr);
 }
 
 /* Calculate F(n) by fast doubling and save it to dest */
 void bn_fib_fdoubling(bn *dest, unsigned int n)
 {
-    bn_resize(dest, 1);
     if (n < 2) {  // Fib(0) = 0, Fib(1) = 1
-        dest->number[0] = n;
+        bn_resize(dest, 1);
+        bn_set_value(dest, n);
         return;
     }
 
     bn *f1 = dest;        /* F(k) */
     bn *f2 = bn_alloc(1); /* F(k+1) */
-    f1->number[0] = 0;
-    f2->number[0] = 1;
+    bn_set_value(f1, 0);
+    bn_set_value(f2, 1);
     bn *k1 = bn_alloc(1);
     bn *k2 = bn_alloc(1);
 
@@ -378,17 +456,17 @@ void bn_fib_fdoubling(bn *dest, unsigned int n)
         /* F(2k) = F(k) * [ 2 * F(k+1) – F(k) ] */
         bn_cpy(k1, f2);
         bn_lshift(k1, 1);
-        bn_sub(k1, f1, k1);
+        bn_sub_from_larger(k1, f1);
         bn_mult(k1, f1, k1);
         /* F(2k+1) = F(k)^2 + F(k+1)^2 */
         bn_mult(f1, f1, f1);
         bn_mult(f2, f2, f2);
         bn_cpy(k2, f1);
-        bn_add(k2, f2, k2);
+        bn_add_to_smaller(k2, f2);
         if (n & i) {
             bn_cpy(f1, k2);
             bn_cpy(f2, k1);
-            bn_add(f2, k2, f2);
+            bn_add_to_smaller(f2, k2);
         } else {
             bn_cpy(f1, k1);
             bn_cpy(f2, k2);
