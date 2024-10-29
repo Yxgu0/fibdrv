@@ -22,7 +22,6 @@ int main()
         perror("Failed to open character device");
         exit(1);
     }
-
     // for each F(i), measure 'sampling_size' times of execution time
     // and remove outlier from 95% confident interval
     for (int i = 0; i <= offset; i++) {
